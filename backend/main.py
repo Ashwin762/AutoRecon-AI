@@ -1,39 +1,117 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import asyncio
 from modules.subdomain_finder import find_subdomains
 from modules.dns_lookup import dns_lookup
-import json
-
-if __name__ == "__main__":
-    domain = "tesla.com"
-    
-    # Test subdomain finder
-    # subdomains = find_subdomains(domain)
-    # print("\n--- SUBDOMAINS FOUND ---")
-    # for sub in subdomains:
-    #     print(sub)
-    
-    # Test DNS lookup
-    dns_results = dns_lookup(domain)
-    print("\n--- DNS RESULTS ---")
-    print(json.dumps(dns_results, indent=2))
-    
 from modules.breach_checker import check_breach
-
-if __name__ == "__main__":
-    # Using HIBP test account
-    result = check_breach("account-exists@hibp-integration-tests.com")
-    
-    import json
-    print("\n--- BREACH RESULTS ---")
-    print(json.dumps(result, indent=2))
-    
 from modules.shodan_recon import shodan_lookup
 
-if __name__ == "__main__":
-    # Tesla's IPs we found earlier from DNS lookup
-    ips = ["23.40.100.207", "23.7.244.207", "2.18.48.207"]
+# Initialize FastAPI app
+app = FastAPI(
+    title="AutoRecon AI",
+    description="AI-Powered Attack Surface Intelligence Platform",
+    version="1.0.0"
+)
+
+# Allow React frontend to talk to this backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Request model - what the user sends us
+class ScanRequest(BaseModel):
+    domain: str
+
+# Response model - what we send back
+class ScanResponse(BaseModel):
+    domain: str
+    subdomains: list
+    dns_info: dict
+    breach_results: list
+    port_scan: dict
+    status: str
+
+@app.get("/")
+def root():
+    return {
+        "message": "AutoRecon AI is running 🚀",
+        "version": "1.0.0"
+    }
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+@app.post("/api/scan")
+def scan_domain(request: ScanRequest):
+    domain = request.domain.strip().lower()
     
-    results = shodan_lookup("tesla.com", ips)
+    # Basic validation
+    if not domain or "." not in domain:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid domain format. Example: tesla.com"
+        )
     
-    import json
-    print("\n--- SHODAN RESULTS ---")
-    print(json.dumps(results, indent=2))
+    print(f"\n[*] Starting full scan for: {domain}")
+    
+    try:
+        # Run all OSINT modules
+        print("[*] Step 1: Finding subdomains...")
+        subdomains = find_subdomains(domain)
+        
+        print("[*] Step 2: DNS lookup...")
+        dns_info = dns_lookup(domain)
+        
+        print("[*] Step 3: Port scanning...")
+        ips = dns_info.get("ip_addresses", [])
+        port_scan = shodan_lookup(domain, ips)
+        
+        print("[*] Step 4: Checking breaches...")
+        breach_results = []
+        common_emails = [
+            f"admin@{domain}",
+            f"info@{domain}",
+            f"security@{domain}",
+        ]
+        for email in common_emails:
+            result = check_breach(email)
+            if result["breached"]:
+                breach_results.append(result)
+        
+        print(f"[+] Scan complete for {domain}!")
+        
+        return {
+            "domain": domain,
+            "subdomains": subdomains,
+            "dns_info": dns_info,
+            "breach_results": breach_results,
+            "port_scan": port_scan,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Scan failed: {str(e)}"
+        )
+
+@app.get("/api/subdomains/{domain}")
+def get_subdomains(domain: str):
+    """Get only subdomains for a domain"""
+    subdomains = find_subdomains(domain)
+    return {
+        "domain": domain,
+        "count": len(subdomains),
+        "subdomains": subdomains
+    }
+
+@app.get("/api/dns/{domain}")
+def get_dns(domain: str):
+    """Get DNS info for a domain"""
+    return dns_lookup(domain)

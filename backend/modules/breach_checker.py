@@ -1,8 +1,11 @@
 import httpx
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+# This makes sure .env is found no matter where we run from
+env_path = Path(__file__).parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 def check_breach(email: str) -> dict:
     print(f"[*] Checking breaches for: {email}")
@@ -45,9 +48,30 @@ def check_breach(email: str) -> dict:
             print("[+] No breaches found — clean!")
             
         elif response.status_code == 401:
-            print("[-] Invalid API key")
+            print(f"[-] Breach check unavailable for: {email} (API subscription required)")
             
     except Exception as e:
         print(f"[-] Error: {e}")
     
     return results
+
+
+def check_domain_breaches(domain: str) -> list:
+    """Check common employee email patterns for a domain"""
+    print(f"[*] Checking domain breaches for: {domain}")
+    
+    test_emails = [
+        f"info@{domain}",
+        f"admin@{domain}",
+        f"contact@{domain}",
+        f"support@{domain}",
+        f"security@{domain}",
+    ]
+    
+    all_results = []
+    for email in test_emails:
+        result = check_breach(email)
+        if result["breached"]:
+            all_results.append(result)
+    
+    return all_results
