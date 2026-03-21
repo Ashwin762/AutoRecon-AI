@@ -29,6 +29,46 @@ function Results({ results }) {
           color: "#00d4ff",
           textShadow: "0 0 30px #00d4ff66"
         }}>{domain.toUpperCase()}</div>
+
+        {/* Download PDF button */}
+        <div style={{ marginTop: "24px" }}>
+          <button
+            onClick={async () => {
+              const response = await fetch("http://localhost:8000/api/report/pdf", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ domain })
+              })
+              const blob = await response.blob()
+              const url = window.URL.createObjectURL(blob)
+              const a = document.createElement("a")
+              a.href = url
+              a.download = `AutoRecon_${domain}_report.pdf`
+              a.click()
+            }}
+            style={{
+              background: "transparent",
+              border: "1px solid #00d4ff",
+              color: "#00d4ff",
+              fontFamily: "'Orbitron', monospace",
+              fontSize: "11px",
+              letterSpacing: "3px",
+              padding: "12px 32px",
+              cursor: "pointer",
+              transition: "all 0.2s"
+            }}
+            onMouseEnter={e => {
+              e.target.style.background = "#00d4ff"
+              e.target.style.color = "#000"
+            }}
+            onMouseLeave={e => {
+              e.target.style.background = "transparent"
+              e.target.style.color = "#00d4ff"
+            }}
+          >
+            ↓ DOWNLOAD PDF REPORT
+          </button>
+        </div>
       </div>
 
       {/* Stats row */}
@@ -238,7 +278,7 @@ function Results({ results }) {
         <div style={{
           fontFamily: "'Share Tech Mono', monospace",
           fontSize: "13px", lineHeight: "1.9",
-          color: "#00ff41cc", whiteSpace: "pre-wrap"
+          color: "#00ff41cc"
         }}>
           {ai_report.report.split('\n').map((line, i) => {
             if (line.startsWith('##')) {

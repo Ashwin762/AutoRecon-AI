@@ -9,6 +9,10 @@ from modules.ai_reporter import generate_threat_report
 from database import create_tables, get_db, ScanResult
 from sqlalchemy.orm import Session
 from fastapi import Depends
+from modules.pdf_generator import generate_pdf_report
+from fastapi.responses import FileResponse
+import tempfile
+import os
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -229,3 +233,39 @@ def get_scan_by_id(scan_id: int, db: Session = Depends(get_db)):
         "risk_score": scan.risk_score,
         "created_at": scan.created_at.isoformat()
     }
+    
+@app.post("/api/report/pdf")
+def generate_pdf(request: ScanRequest, db: Session = Depends(get_db)):
+    """Generate PDF report for a domain's latest scan"""
+    domain = request.domain.strip().lower()
+
+    # Get latest scan from DB
+    scan = db.query(ScanResult).filter(
+        ScanResult.domain == domain
+    ).order_by(ScanResult.created_at.desc()).first()
+
+    if not scan:
+        raise HTTPException(
+            status_code=404,
+            detail="No scan found for this domain. Run a scan first."
+        )
+
+    scan_data = {
+        "domain": scan.domain,
+        "subdomains": scan.subdomains or [],
+        "dns_info": scan.dns_info or {},
+        "port_scan": scan.port_scan or {},
+        "breach_results": scan.breach_results or [],
+        "ai_report": scan.ai_report or {}
+    }
+
+    # Generate PDF
+    output_path = f"reports/{domain.replace('.', '_')}_report.pdf"
+    os.makedirs("reports", exist_ok=True)
+    generate_pdf_report(scan_data, output_path)
+
+    return FileResponse(
+        output_path,
+        media_type="application/pdf",
+        filename=f"AutoRecon_{domain}_report.pdf"
+    )
