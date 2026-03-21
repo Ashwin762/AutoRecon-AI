@@ -25,3 +25,15 @@ if __name__ == "__main__":
     import json
     print("\n--- BREACH RESULTS ---")
     print(json.dumps(result, indent=2))
+    
+from modules.shodan_recon import shodan_lookup
+
+if __name__ == "__main__":
+    # Tesla's IPs we found earlier from DNS lookup
+    ips = ["23.40.100.207", "23.7.244.207", "2.18.48.207"]
+    
+    results = shodan_lookup("tesla.com", ips)
+    
+    import json
+    print("\n--- SHODAN RESULTS ---")
+    print(json.dumps(results, indent=2))
