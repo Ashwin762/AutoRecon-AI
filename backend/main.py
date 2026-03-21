@@ -15,3 +15,13 @@ if __name__ == "__main__":
     dns_results = dns_lookup(domain)
     print("\n--- DNS RESULTS ---")
     print(json.dumps(dns_results, indent=2))
+    
+from modules.breach_checker import check_breach
+
+if __name__ == "__main__":
+    # Using HIBP test account
+    result = check_breach("account-exists@hibp-integration-tests.com")
+    
+    import json
+    print("\n--- BREACH RESULTS ---")
+    print(json.dumps(result, indent=2))
