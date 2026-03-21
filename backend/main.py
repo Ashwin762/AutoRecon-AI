@@ -6,21 +6,29 @@ from modules.dns_lookup import dns_lookup
 from modules.breach_checker import check_breach
 from modules.shodan_recon import shodan_lookup
 from modules.ai_reporter import generate_threat_report
+from database import create_tables, get_db, ScanResult
+from sqlalchemy.orm import Session
+from fastapi import Depends
 
 # Initialize FastAPI app
 app = FastAPI(
+   
+    
     title="AutoRecon AI",
     description="AI-Powered Attack Surface Intelligence Platform",
     version="1.0.0"
 )
 
+create_tables()
+
 # Allow React frontend to talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+
 )
 
 # Request model
@@ -113,7 +121,7 @@ def scan_domain(request: ScanRequest):
 
 
 @app.post("/api/scan/full")
-def full_scan_with_report(request: ScanRequest):
+def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
     """Full scan + AI generated threat report"""
     domain = request.domain.strip().lower()
 
@@ -162,6 +170,20 @@ def full_scan_with_report(request: ScanRequest):
         ai_report = generate_threat_report(scan_data)
 
         print(f"[+] Full AI scan complete for {domain}!")
+        
+        # Save to database
+        db_scan = ScanResult(
+            domain=domain,
+            subdomains=subdomains,
+            dns_info=dns_info,
+            port_scan=port_scan,
+            breach_results=breach_results,
+            ai_report=ai_report,
+            risk_score=ai_report.get("risk_score", 0)
+        )
+        db.add(db_scan)
+        db.commit()
+        print(f"[+] Scan saved to database with ID: {db_scan.id}")
 
         return {
             **scan_data,
@@ -174,3 +196,36 @@ def full_scan_with_report(request: ScanRequest):
             status_code=500,
             detail=f"Scan failed: {str(e)}"
         )
+        
+@app.get("/api/history")
+def get_scan_history(db: Session = Depends(get_db)):
+    """Get all previous scans"""
+    scans = db.query(ScanResult).order_by(ScanResult.created_at.desc()).limit(20).all()
+    return [
+        {
+            "id": s.id,
+            "domain": s.domain,
+            "risk_score": s.risk_score,
+            "subdomains_count": len(s.subdomains) if s.subdomains else 0,
+            "created_at": s.created_at.isoformat()
+        }
+        for s in scans
+    ]
+
+@app.get("/api/history/{scan_id}")
+def get_scan_by_id(scan_id: int, db: Session = Depends(get_db)):
+    """Get a specific scan by ID"""
+    scan = db.query(ScanResult).filter(ScanResult.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return {
+        "id": scan.id,
+        "domain": scan.domain,
+        "subdomains": scan.subdomains,
+        "dns_info": scan.dns_info,
+        "port_scan": scan.port_scan,
+        "breach_results": scan.breach_results,
+        "ai_report": scan.ai_report,
+        "risk_score": scan.risk_score,
+        "created_at": scan.created_at.isoformat()
+    }

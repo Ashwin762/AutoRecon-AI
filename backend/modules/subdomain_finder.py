@@ -6,7 +6,7 @@ def find_subdomains(domain: str) -> list:
     url = f"https://crt.sh/?q=%.{domain}&output=json"
     
     try:
-        response = requests.get(url, timeout=30)  # increased from 10 to 30
+        response = requests.get(url, timeout=60)  # increased from 10 to 60
         data = response.json()
         
         subdomains = set()
