@@ -57,7 +57,7 @@ function Scanner({ setScanResults, setIsScanning, isScanning }) {
 
       addLog("[AI] Initializing LLaMA3 threat analysis engine...", "warning")
 
-      const response = await axios.post("http://localhost:8000/api/scan/full", {
+      const response = await axios.post("http://https://autorecon-ai.onrender.com/api/scan/full", {
         domain: domain.trim()
       })
 

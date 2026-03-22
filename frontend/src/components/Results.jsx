@@ -34,7 +34,7 @@ function Results({ results }) {
         <div style={{ marginTop: "24px" }}>
           <button
             onClick={async () => {
-              const response = await fetch("http://localhost:8000/api/report/pdf", {
+              const response = await fetch("http://https://autorecon-ai.onrender.com/api/report/pdf", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ domain })
