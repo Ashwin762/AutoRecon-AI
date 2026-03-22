@@ -29,7 +29,17 @@ class ScanResult(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 def create_tables():
-    Base.metadata.create_all(bind=engine)
+    import time
+    max_retries = 10
+    for i in range(max_retries):
+        try:
+            Base.metadata.create_all(bind=engine)
+            print("[+] Database tables created successfully!")
+            return
+        except Exception as e:
+            print(f"[-] Database not ready, retrying in 3s... ({i+1}/{max_retries})")
+            time.sleep(3)
+    print("[-] Could not connect to database after max retries")
 
 def get_db():
     db = SessionLocal()
