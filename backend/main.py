@@ -13,6 +13,8 @@ from modules.pdf_generator import generate_pdf_report
 from fastapi.responses import FileResponse
 import tempfile
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -126,7 +128,7 @@ def scan_domain(request: ScanRequest):
 
 @app.post("/api/scan/full")
 def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
-    """Full scan + AI generated threat report"""
+    """Full scan + AI generated threat report with parallel execution"""
     domain = request.domain.strip().lower()
 
     if not domain or "." not in domain:
@@ -137,30 +139,54 @@ def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
 
     print(f"\n[*] Starting FULL AI scan for: {domain}")
 
+    # Check cache first — if scanned in last 24 hours, return cached result
+    from datetime import datetime, timedelta
+    cached = db.query(ScanResult).filter(
+        ScanResult.domain == domain,
+        ScanResult.created_at >= datetime.utcnow() - timedelta(hours=24)
+    ).order_by(ScanResult.created_at.desc()).first()
+
+    if cached:
+        print(f"[+] Cache hit! Returning cached scan for {domain}")
+        return {
+            "domain": cached.domain,
+            "subdomains": cached.subdomains or [],
+            "dns_info": cached.dns_info or {},
+            "breach_results": cached.breach_results or [],
+            "port_scan": cached.port_scan or {},
+            "ai_report": cached.ai_report or {},
+            "status": "success",
+            "cached": True
+        }
+
     try:
-        print("[*] Step 1: Finding subdomains...")
-        subdomains = find_subdomains(domain)
+        # Run subdomain + DNS in parallel using threads
+        print("[*] Running parallel recon modules...")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            subdomain_future = executor.submit(find_subdomains, domain)
+            dns_future = executor.submit(dns_lookup, domain)
 
-        print("[*] Step 2: DNS lookup...")
-        dns_info = dns_lookup(domain)
+            # Get results
+            subdomains = subdomain_future.result()
+            dns_info = dns_future.result()
 
-        print("[*] Step 3: Port scanning...")
+        # Port scan needs IPs from DNS
+        print("[*] Running port scan...")
         ips = dns_info.get("ip_addresses", [])
         port_scan = shodan_lookup(domain, ips)
 
-        print("[*] Step 4: Checking breaches...")
-        breach_results = []
+        # Breach checks in parallel
+        print("[*] Running parallel breach checks...")
         common_emails = [
             f"admin@{domain}",
             f"info@{domain}",
             f"security@{domain}",
         ]
-        for email in common_emails:
-            result = check_breach(email)
-            if result["breached"]:
-                breach_results.append(result)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            breach_futures = [executor.submit(check_breach, email) for email in common_emails]
+            breach_results = [f.result() for f in breach_futures if f.result()["breached"]]
 
-        # Compile all scan data
+        # Compile scan data
         scan_data = {
             "domain": domain,
             "subdomains": subdomains,
@@ -170,11 +196,11 @@ def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
         }
 
         # Generate AI report
-        print("[*] Step 5: Generating AI threat report...")
+        print("[*] Generating AI threat report...")
         ai_report = generate_threat_report(scan_data)
 
         print(f"[+] Full AI scan complete for {domain}!")
-        
+
         # Save to database
         db_scan = ScanResult(
             domain=domain,
@@ -192,7 +218,8 @@ def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
         return {
             **scan_data,
             "ai_report": ai_report,
-            "status": "success"
+            "status": "success",
+            "cached": False
         }
 
     except Exception as e:
