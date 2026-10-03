@@ -19,7 +19,10 @@ def check_breach(email: str) -> dict:
     
     try:
         api_key = os.getenv("HIBP_API_KEY")
-        
+        if not api_key:
+            print(f"[-] Breach check skipped for: {email} (HIBP_API_KEY not set)")
+            return results
+
         headers = {
             "hibp-api-key": api_key,
             "user-agent": "AutoRecon-AI"

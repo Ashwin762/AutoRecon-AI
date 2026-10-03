@@ -14,3 +14,6 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+# Local SQLite fallback DB and generated reports
+backend/autorecon.db
+backend/reports/
