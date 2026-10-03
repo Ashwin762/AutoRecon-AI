@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import RiskGauge from "./RiskGauge"
 import { useScrollReveal } from "../hooks/useScrollReveal"
+import { API_URL } from "../config"
 
 function Results({ results }) {
   const reportRef = useRef(null)
@@ -34,11 +35,15 @@ function Results({ results }) {
         <div style={{ marginTop: "24px" }}>
           <button
             onClick={async () => {
-              const response = await fetch("https://autorecon-ai.onrender.com/api/report/pdf", {
+              const response = await fetch(`${API_URL}/api/report/pdf`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ domain })
               })
+              if (!response.ok) {
+                alert("PDF generation failed. Please run the scan again.")
+                return
+              }
               const blob = await response.blob()
               const url = window.URL.createObjectURL(blob)
               const a = document.createElement("a")

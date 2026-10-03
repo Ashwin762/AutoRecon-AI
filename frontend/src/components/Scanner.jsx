@@ -1,6 +1,7 @@
 // Production build v2
 import { useState, useRef } from "react"
 import axios from "axios"
+import { API_URL } from "../config"
 
 function Scanner({ setScanResults, setIsScanning, isScanning }) {
   const [domain, setDomain] = useState("")
@@ -58,9 +59,9 @@ function Scanner({ setScanResults, setIsScanning, isScanning }) {
 
       addLog("[AI] Initializing LLaMA3 threat analysis engine...", "warning")
 
-      const response = await axios.post("https://autorecon-ai.onrender.com/api/scan/full", {
+      const response = await axios.post(`${API_URL}/api/scan/full`, {
         domain: domain.trim()
-      })
+      }, { timeout: 180000 })
 
       setProgress(100)
       addLog(`[SUCCESS] Scan complete — ${response.data.subdomains.length} subdomains discovered`, "success")
@@ -70,7 +71,7 @@ function Scanner({ setScanResults, setIsScanning, isScanning }) {
       setScanResults(response.data)
 
     } catch (err) {
-      addLog(`[ERROR] Scan failed: ${err.message}`, "error")
+      addLog(`[ERROR] Scan failed: ${err.response?.data?.detail || err.message}`, "error")
     } finally {
       setIsScanning(false)
     }

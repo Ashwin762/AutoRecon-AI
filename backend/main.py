@@ -10,16 +10,15 @@ from database import create_tables, get_db, ScanResult
 from sqlalchemy.orm import Session
 from fastapi import Depends
 from modules.pdf_generator import generate_pdf_report
-from fastapi.responses import FileResponse
-import tempfile
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.requests import Request
+from datetime import datetime, timedelta
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 # Initialize FastAPI app
 app = FastAPI(
-   
-    
     title="AutoRecon AI",
     description="AI-Powered Attack Surface Intelligence Platform",
     version="1.0.0"
@@ -27,15 +26,34 @@ app = FastAPI(
 
 create_tables()
 
-# Allow React frontend to talk to this backend
+# Allow React frontend to talk to this backend.
+# Set ALLOWED_ORIGINS (comma-separated) on Render to restrict, e.g.
+# https://autorecon-ai.vercel.app,http://localhost:5173
+allowed_origins = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app" if "*" not in allowed_origins else None,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-
 )
+
+
+# Unhandled errors bypass CORSMiddleware, so the browser would only see a
+# generic "Network Error". Return JSON with CORS headers instead.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    print(f"[-] Unhandled error on {request.url.path}: {exc}")
+    origin = request.headers.get("origin")
+    headers = {"Access-Control-Allow-Origin": origin or "*"} if origin else {}
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"},
+        headers=headers,
+    )
 
 # Request model
 class ScanRequest(BaseModel):
@@ -140,11 +158,15 @@ def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
     print(f"\n[*] Starting FULL AI scan for: {domain}")
 
     # Check cache first — if scanned in last 24 hours, return cached result
-    from datetime import datetime, timedelta
-    cached = db.query(ScanResult).filter(
-        ScanResult.domain == domain,
-        ScanResult.created_at >= datetime.utcnow() - timedelta(hours=24)
-    ).order_by(ScanResult.created_at.desc()).first()
+    cached = None
+    try:
+        cached = db.query(ScanResult).filter(
+            ScanResult.domain == domain,
+            ScanResult.created_at >= datetime.utcnow() - timedelta(hours=24)
+        ).order_by(ScanResult.created_at.desc()).first()
+    except Exception as e:
+        print(f"[-] Cache lookup failed, continuing without cache: {e}")
+        db.rollback()
 
     if cached:
         print(f"[+] Cache hit! Returning cached scan for {domain}")
@@ -184,7 +206,7 @@ def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
         ]
         with ThreadPoolExecutor(max_workers=3) as executor:
             breach_futures = [executor.submit(check_breach, email) for email in common_emails]
-            breach_results = [f.result() for f in breach_futures if f.result()["breached"]]
+            breach_results = [r for r in (f.result() for f in breach_futures) if r["breached"]]
 
         # Compile scan data
         scan_data = {
@@ -201,19 +223,23 @@ def full_scan_with_report(request: ScanRequest, db: Session = Depends(get_db)):
 
         print(f"[+] Full AI scan complete for {domain}!")
 
-        # Save to database
-        db_scan = ScanResult(
-            domain=domain,
-            subdomains=subdomains,
-            dns_info=dns_info,
-            port_scan=port_scan,
-            breach_results=breach_results,
-            ai_report=ai_report,
-            risk_score=ai_report.get("risk_score", 0)
-        )
-        db.add(db_scan)
-        db.commit()
-        print(f"[+] Scan saved to database with ID: {db_scan.id}")
+        # Save to database — a DB failure shouldn't throw away the scan
+        try:
+            db_scan = ScanResult(
+                domain=domain,
+                subdomains=subdomains,
+                dns_info=dns_info,
+                port_scan=port_scan,
+                breach_results=breach_results,
+                ai_report=ai_report,
+                risk_score=ai_report.get("risk_score", 0)
+            )
+            db.add(db_scan)
+            db.commit()
+            print(f"[+] Scan saved to database with ID: {db_scan.id}")
+        except Exception as e:
+            print(f"[-] Could not save scan to database: {e}")
+            db.rollback()
 
         return {
             **scan_data,
@@ -286,9 +312,10 @@ def generate_pdf(request: ScanRequest, db: Session = Depends(get_db)):
         "ai_report": scan.ai_report or {}
     }
 
-    # Generate PDF
-    output_path = f"reports/{domain.replace('.', '_')}_report.pdf"
-    os.makedirs("reports", exist_ok=True)
+    # Generate PDF (absolute path so it works regardless of the start directory)
+    reports_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    output_path = os.path.join(reports_dir, f"{domain.replace('.', '_')}_report.pdf")
     generate_pdf_report(scan_data, output_path)
 
     return FileResponse(

@@ -6,7 +6,19 @@ from pathlib import Path
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+_client = None
+
+
+def get_client():
+    # Created lazily: Groq() raises if GROQ_API_KEY is missing, which would
+    # otherwise crash the whole app at import time
+    global _client
+    if _client is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not set on the server")
+        _client = Groq(api_key=api_key)
+    return _client
 
 def generate_threat_report(scan_data: dict) -> dict:
     print(f"[*] Generating AI threat report for: {scan_data['domain']}")
@@ -68,7 +80,7 @@ Be specific, professional, and reference actual data from the scan.
 """
 
     try:
-        response = client.chat.completions.create(
+        response = get_client().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {
@@ -107,9 +119,14 @@ Be specific, professional, and reference actual data from the scan.
         print(f"[-] AI report generation failed: {e}")
         return {
             "domain": domain,
-            "risk_score": 0,
+            "risk_score": calculate_risk_score(scan_data),
             "report": f"Report generation failed: {str(e)}",
-            "stats": {}
+            "stats": {
+                "subdomains_found": len(subdomains),
+                "open_ports": port_scan.get("total_open_ports", 0),
+                "breaches_found": len(breach_results),
+                "vulnerabilities": len(port_scan.get("vulnerabilities", []))
+            }
         }
 
 
